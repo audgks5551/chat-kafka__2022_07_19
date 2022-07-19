@@ -39,7 +39,7 @@ public class AppTest {
     }
 
     @Test
-    public void 토픽_리스트_조회() throws InterruptedException {
+    public void 토픽_리스트_조회() {
         // given
         String topicName = "chat2";
         kafkaRepository.create(topicName);
