@@ -1,13 +1,16 @@
 import org.apache.kafka.clients.admin.*;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Properties;
+import java.time.Duration;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -22,6 +25,7 @@ public class KafkaRepository {
 
         producerConfigs = new Properties();
         producerConfigs.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVER);
+        producerConfigs.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         producerConfigs.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         producerConfigs.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
     }
@@ -99,8 +103,8 @@ public class KafkaRepository {
         kafkaProducer.close();
     }
 
-    public RecordMetadata sendStringStringProducer(KafkaProducer<String, String> kafkaProducer, String topicName, String data) {
-        ProducerRecord<String, String> record = new ProducerRecord<>(topicName, data);
+    public RecordMetadata sendStringStringProducer(KafkaProducer<String, String> kafkaProducer, String topicName, String key, String data) {
+        ProducerRecord<String, String> record = new ProducerRecord<>(topicName, key, data);
 
         try {
             return kafkaProducer.send(record).get();
@@ -111,10 +115,34 @@ public class KafkaRepository {
         }
     }
 
-    public RecordMetadata sendStringString(String topicName, String value) {
+    public RecordMetadata sendStringString(String topicName, String key, String value) {
         KafkaProducer<String, String> producer = createStringStringProducer();
-        RecordMetadata recordMetadata = sendStringStringProducer(producer, topicName, value);
+        RecordMetadata recordMetadata = sendStringStringProducer(producer, topicName, key, value);
         deleteProducer(producer);
         return recordMetadata;
+    }
+
+    public KafkaConsumer<String, String> createStringStringConsumer() {
+        Properties properties = new Properties();
+        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVER);
+        properties.put(ConsumerConfig.GROUP_ID_CONFIG, UUID.randomUUID().toString());
+        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+
+        return new KafkaConsumer<String, String>(properties);
+    }
+
+    public void continueLoadingStringStringConsumer(String topicName, List<String> recordList) {
+        KafkaConsumer<String, String> kafkaConsumer = createStringStringConsumer();
+
+        kafkaConsumer.subscribe(Collections.singleton(topicName));
+
+        while (true) {
+            ConsumerRecords<String, String> records = kafkaConsumer.poll(Duration.ofSeconds(1));
+
+            records.forEach(record -> recordList.add(record.value()));
+        }
     }
 }

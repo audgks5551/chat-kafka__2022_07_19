@@ -1,13 +1,18 @@
 import org.apache.kafka.clients.admin.TopicDescription;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartitionInfo;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
@@ -16,10 +21,12 @@ import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
 public class AppTest {
     private KafkaRepository kafkaRepository;
     private ChatRepository chatRepository;
+    private ChatService chatService;
 
     public AppTest() {
         kafkaRepository = new KafkaRepository();
         chatRepository = new ChatRepository();
+        chatService = new ChatService(chatRepository);
 
         kafkaRepository.createTopic(ChatRepository.CHAT_LIST_TOPIC_NAME);
     }
@@ -29,6 +36,7 @@ public class AppTest {
         kafkaRepository.deleteTopic("chat1");
         kafkaRepository.deleteTopic("chat2");
         kafkaRepository.deleteTopic("chat3");
+        kafkaRepository.deleteTopic("something");
         kafkaRepository.deleteTopic(ChatRepository.CHAT_LIST_TOPIC_NAME);
     }
 
@@ -97,7 +105,7 @@ public class AppTest {
 
         // when
         RecordMetadata recordMetadata =
-                kafkaRepository.sendStringStringProducer(producer, ChatRepository.CHAT_LIST_TOPIC_NAME, data);
+                kafkaRepository.sendStringStringProducer(producer, ChatRepository.CHAT_LIST_TOPIC_NAME, null, data);
 
         // then
         assertThat(recordMetadata).isNotNull();
@@ -113,7 +121,7 @@ public class AppTest {
         Room room = new Room(id, name);
 
         // when
-        Room createdRoom = chatRepository.create(room);
+        Room createdRoom = chatRepository.createRoom(room);
 
         // then
         assertThat(createdRoom).isNotNull();
@@ -127,12 +135,115 @@ public class AppTest {
         String id = UUID.randomUUID().toString();
         String name = "같이 공부하실 분";
         Room room = new Room(id, name);
-        Room createdRoom = chatRepository.create(room);
+        Room createdRoom = chatRepository.createRoom(room);
 
         // when
-        boolean check = chatRepository.delete(createdRoom);
+        boolean check = chatRepository.deleteRoom(createdRoom);
 
         // then
         assertThat(check).isTrue();
+    }
+
+    @Test
+    public void consumer_생성() {
+        // given
+        String topicName = "something";
+        kafkaRepository.createTopic(topicName);
+
+        // when
+        KafkaConsumer kafkaConsumer = kafkaRepository.createStringStringConsumer();
+
+        // then
+        assertThat(kafkaConsumer).isNotNull();
+    }
+
+    @Test
+    public void 토픽_구독후_토픽에_있는_데이터_5초동안_가져오기() {
+        // given
+        String topicName = "something";
+        kafkaRepository.createTopic(topicName);
+        kafkaRepository.sendStringString(topicName, null, "hello");
+        List<String> values = new ArrayList<>();
+
+        // when
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        executorService.submit(() -> {
+            kafkaRepository.continueLoadingStringStringConsumer(topicName, values);
+        });
+
+        try {
+            Thread.sleep(5000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        executorService.shutdown();
+
+
+        // then
+        int size = values.size();
+        assertThat(size).isGreaterThan(0);
+    }
+
+    @Test
+    public void 채팅방_생성_후_채팅방에_메세지_저장하기() {
+        // given
+        String id = UUID.randomUUID().toString();
+        String name = "같이 공부하실 분";
+        Room room = new Room(id, name);
+        chatRepository.createRoom(room);
+        String message = "안녕하세요. 저는 이명한입니다.";
+
+        // when
+        chatRepository.saveMessage(room, message);
+
+        // then
+        List<String> values = new ArrayList<>();
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        executorService.submit(() -> {
+            kafkaRepository.continueLoadingStringStringConsumer(room.getId(), values);
+        });
+
+        try {
+            Thread.sleep(5000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        executorService.shutdown();
+
+        int size = values.size();
+        Assertions.assertThat(size).isGreaterThan(0);
+
+        kafkaRepository.deleteTopic(id);
+    }
+
+    @Test
+    public void 채팅방의_메세지_5초동안_불러오기() {
+        // given
+        String id = UUID.randomUUID().toString();
+        String name = "같이 공부하실 분";
+        Room room = new Room(id, name);
+        chatRepository.createRoom(room);
+        String message = "안녕하세요. 저는 이명한입니다.";
+        chatRepository.saveMessage(room, message);
+
+        // when
+        List<String> messages = new ArrayList<>();
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        executorService.submit(() -> {
+            chatRepository.continueMessage(room, messages);
+        });
+
+        try {
+            Thread.sleep(5000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        executorService.shutdown();
+
+        // then
+        int size = messages.size();
+        Assertions.assertThat(size).isGreaterThan(0);
+
+        kafkaRepository.deleteTopic(id);
     }
 }
