@@ -9,7 +9,7 @@ public class Room {
     private String id;
     private String name;
 
-    public Room(String name) {
+    public Room (String name) {
         this.name = name;
     }
 }

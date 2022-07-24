@@ -1,6 +1,5 @@
 import org.apache.kafka.clients.admin.*;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -9,7 +8,6 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -19,6 +17,7 @@ public class KafkaRepository {
     private final static String BOOTSTRAP_SERVER = "192.168.0.21:9092";
     private Properties topicConfigs;
     private Properties producerConfigs;
+    private Properties consumerConfigs;
     public KafkaRepository() {
         topicConfigs = new Properties();
         topicConfigs.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVER);
@@ -28,6 +27,14 @@ public class KafkaRepository {
         producerConfigs.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         producerConfigs.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         producerConfigs.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+
+        consumerConfigs = new Properties();
+        consumerConfigs.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVER);
+        consumerConfigs.put(ConsumerConfig.GROUP_ID_CONFIG, UUID.randomUUID().toString());
+        consumerConfigs.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        consumerConfigs.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        consumerConfigs.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        consumerConfigs.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
     }
 
     public boolean createTopic(String topicName) {
@@ -123,26 +130,17 @@ public class KafkaRepository {
     }
 
     public KafkaConsumer<String, String> createStringStringConsumer() {
-        Properties properties = new Properties();
-        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVER);
-        properties.put(ConsumerConfig.GROUP_ID_CONFIG, UUID.randomUUID().toString());
-        properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-        properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-
-        return new KafkaConsumer<String, String>(properties);
+        return new KafkaConsumer<String, String>(consumerConfigs);
     }
 
-    public void continueLoadingStringStringConsumer(String topicName, List<String> recordList) {
-        KafkaConsumer<String, String> kafkaConsumer = createStringStringConsumer();
+    public ConsumerWorker createConsumerWorker(List<String> messages, List<String> topics) {
+        ConsumerWorker consumerWorker = new ConsumerWorker(createStringStringConsumer(), messages, topics);
+        new Thread(consumerWorker).start();
 
-        kafkaConsumer.subscribe(Collections.singleton(topicName));
+        return consumerWorker;
+    }
 
-        while (true) {
-            ConsumerRecords<String, String> records = kafkaConsumer.poll(Duration.ofSeconds(1));
-
-            records.forEach(record -> recordList.add(record.value()));
-        }
+    public void deleteConsumerWorker(ConsumerWorker consumerWorker) {
+        Runtime.getRuntime().addShutdownHook(new Thread(new ConsumerCloser(consumerWorker)));
     }
 }

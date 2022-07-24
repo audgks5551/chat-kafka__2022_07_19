@@ -44,8 +44,4 @@ public class ChatRepository {
     public void saveMessage(Room room, String message) {
         kafkaRepository.sendStringString(room.getId(), null, message);
     }
-
-    public void continueMessage(Room room, List<String> messages) {
-        kafkaRepository.continueLoadingStringStringConsumer(room.getId(), messages);
-    }
 }
